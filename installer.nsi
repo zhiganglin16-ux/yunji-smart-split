@@ -10,7 +10,7 @@ Unicode true
 !include "nsDialogs.nsh"
 
 Name "云极智能拆版"
-OutFile "setup-yunji-v1.2.exe"
+OutFile "云极智能拆版V1.2-安装包.exe"
 InstallDir "$PROGRAMFILES64\云极科技\云极智能拆版"
 RequestExecutionLevel admin
 

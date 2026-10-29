@@ -34,22 +34,29 @@ jobs:
       - name: 安装 NSIS
         run: choco install nsis -y --no-progress
 
+      - name: 确保 NSIS 脚本为 UTF-8 with BOM（避免中文文件名解析乱码）
+        shell: pwsh
+        run: |
+          python -c "p='installer.nsi'; s=open(p,encoding='utf-8').read(); open(p,'w',encoding='utf-8-sig').write(s)"
+          Get-Content installer.nsi -TotalCount 3
+
       - name: 生成安装包
         shell: cmd
         run: |
           makensis /V2 installer.nsi
           dir /b
 
-      - name: 压缩为单个 zip（英文名压缩，规避 cmd/pwsh 编码差异）
+      - name: 压缩为单个 zip（通配符匹配实际 exe，规避文件名编码差异）
         shell: pwsh
         run: |
-          Compress-Archive -Path "setup-yunji-v1.2.exe" -DestinationPath "setup-yunji-v1.2.zip" -Force
+          $exe = Get-ChildItem *.exe | Select-Object -First 1
+          Write-Host "压缩目标: $($exe.Name)"
+          Compress-Archive -Path $exe.FullName -DestinationPath "setup-yunji-v1.2.zip" -Force
 
       - name: 重命名为中文交付名
         shell: pwsh
         run: |
           Rename-Item -Path "setup-yunji-v1.2.zip" -NewName "云极智能拆版V1.2-安装包.zip" -Force
-          Rename-Item -Path "setup-yunji-v1.2.exe" -NewName "云极智能拆版V1.2-安装包.exe" -Force
           Get-ChildItem *.zip, *.exe
 
       - name: 上传构建产物
