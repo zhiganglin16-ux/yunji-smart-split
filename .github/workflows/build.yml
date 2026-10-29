@@ -42,25 +42,15 @@ jobs:
           python -c "p='installer.nsi'; s=open(p,encoding='utf-8').read(); open(p,'w',encoding='utf-8-sig').write(s)"
           Get-Content installer.nsi -TotalCount 3
 
-      - name: 生成安装包
-        shell: cmd
-        run: |
-          makensis /V2 installer.nsi
-          dir /b
-
-      - name: 上传构建产物（安装器 exe）
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer
-          path: setup-yunji-v1.2.exe
-
-      - name: 发布 Release 并上传 exe（全链路诊断）
+      - name: 生成安装包并发布 Release（一步完成）
         uses: actions/github-script@v7
         with:
           script: |
+            const { execSync } = require('child_process');
             const fs = require('fs');
             const path = require('path');
             const ws = process.env.GITHUB_WORKSPACE || '.';
+            execSync('makensis /V2 installer.nsi', { cwd: ws, stdio: 'inherit' });
             const exePath = path.join(ws, 'setup-yunji-v1.2.exe');
             const assetName = 'setup-yunji-v1.2.exe';
             const logs = [];
@@ -73,7 +63,7 @@ jobs:
             } catch (e) {
               log('A getReleaseByTag err: ' + (e && (e.message || e.stack) || e).toString().slice(0, 300));
               try {
-                const { data } = await github.rest.repos.createRelease({ owner, repo, tag_name: 'v1.2', name: 'yunji-v1.2', body: 'installer' });
+                const { data } = await github.rest.repos.createRelease({ owner, repo, tag_name: 'v1.2', name: '云极智能拆版 V1.2', body: '云极智能拆版 V1.2 安装包（Windows）' });
                 rel = data; log('A created release ' + rel.id);
               } catch (e2) {
                 log('A createRelease err: ' + (e2 && (e2.message || e2.stack) || e2).toString().slice(0, 300));
