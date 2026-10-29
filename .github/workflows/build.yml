@@ -46,18 +46,9 @@ jobs:
           makensis /V2 installer.nsi
           dir /b
 
-      - name: 压缩为单个 zip（通配符匹配实际 exe，规避文件名编码差异）
+      - name: 压缩为单个 zip（Python zipfile，规避 PowerShell Compress-Archive 问题）
         shell: pwsh
-        run: |
-          $exe = Get-ChildItem *.exe | Select-Object -First 1
-          Write-Host "压缩目标: $($exe.Name)"
-          Compress-Archive -Path $exe.FullName -DestinationPath "setup-yunji-v1.2.zip" -Force
-
-      - name: 重命名为中文交付名
-        shell: pwsh
-        run: |
-          Rename-Item -Path "setup-yunji-v1.2.zip" -NewName "云极智能拆版V1.2-安装包.zip" -Force
-          Get-ChildItem *.zip, *.exe
+        run: python -X utf8 scripts/make_zip.py
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
