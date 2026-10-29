@@ -46,20 +46,16 @@ jobs:
           makensis /V2 installer.nsi
           dir /b
 
-      - name: 压缩为单个 zip（Python zipfile，规避 PowerShell Compress-Archive 问题）
-        shell: pwsh
-        run: python -X utf8 scripts/make_zip.py
-
-      - name: 上传构建产物
+      - name: 上传构建产物（安装器 exe）
         uses: actions/upload-artifact@v4
         with:
           name: installer
-          path: 云极智能拆版V1.2-安装包.zip
+          path: setup-yunji-v1.2.exe
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: 云极智能拆版V1.2-安装包.zip
+          files: setup-yunji-v1.2.exe
           tag_name: v1.2
           name: 云极智能拆版 V1.2
           body: |
