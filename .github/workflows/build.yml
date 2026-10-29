@@ -19,7 +19,6 @@ jobs:
           [IO.File]::WriteAllBytes("icon.ico", [Convert]::FromBase64String((Get-Content -Raw icon.ico.b64).Trim()))
           New-Item -ItemType Directory -Force brand | Out-Null
           [IO.File]::WriteAllBytes("brand/云极科技LOGO-图标.png", [Convert]::FromBase64String((Get-Content -Raw brand_logo.b64).Trim()))
-          Get-ChildItem icon.ico, brand
 
       - uses: actions/setup-python@v5
         with:
@@ -36,13 +35,12 @@ jobs:
       - name: 安装 NSIS
         run: choco install nsis -y --no-progress
 
-      - name: 确保 NSIS 脚本为 UTF-8 with BOM（避免中文文件名解析乱码）
+      - name: 确保 NSIS 脚本为 UTF-8 with BOM
         shell: pwsh
         run: |
           python -c "p='installer.nsi'; s=open(p,encoding='utf-8').read(); open(p,'w',encoding='utf-8-sig').write(s)"
-          Get-Content installer.nsi -TotalCount 3
 
-      - name: 生成安装包并发布 Release（一步完成）
+      - name: 生成安装包并发布 Release（makensis 输出捕获 + 双通道上传 + 诊断落盘）
         uses: actions/github-script@v7
         with:
           script: |
@@ -50,12 +48,23 @@ jobs:
             const fs = require('fs');
             const path = require('path');
             const ws = process.env.GITHUB_WORKSPACE || '.';
-            execSync('makensis /V2 installer.nsi', { cwd: ws, stdio: 'inherit' });
-            const exePath = path.join(ws, 'setup-yunji-v1.2.exe');
-            const assetName = 'setup-yunji-v1.2.exe';
             const logs = [];
             const log = (s) => { logs.push(String(s)); console.log(s); };
             const owner = context.repo.owner, repo = context.repo.repo;
+            let mkOk = false;
+            try {
+              const out = execSync('makensis /V2 installer.nsi', { cwd: ws, stdio: 'pipe', encoding: 'utf8' });
+              mkOk = true;
+              log('E makensis OK, output len=' + (out || '').length);
+            } catch (e) {
+              log('E makensis FAIL status=' + e.status);
+              log('E stdout=' + String(e.stdout || '').slice(0, 3000));
+              log('E stderr=' + String(e.stderr || '').slice(0, 3000));
+            }
+            let files;
+            try { files = fs.readdirSync(ws).join(' | '); log('E ws files: ' + files); } catch (err) { log('E readdir err: ' + String(err).slice(0, 200)); }
+            const exePath = path.join(ws, 'setup-yunji-v1.2.exe');
+            const assetName = 'setup-yunji-v1.2.exe';
             let rel = null;
             try {
               const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: 'v1.2' });
@@ -70,15 +79,12 @@ jobs:
               }
             }
             let buf = null;
-            try {
-              buf = fs.readFileSync(exePath);
-              log('B read exe size ' + buf.length);
-            } catch (e3) {
-              log('B readFileSync err: ' + (e3 && (e3.message || e3.stack) || e3).toString().slice(0, 300));
+            if (mkOk) {
               try {
-                log('B cwd files: ' + fs.readdirSync(ws).join(' | '));
-              } catch (e3b) {
-                log('B readdir err: ' + String(e3b).slice(0, 200));
+                buf = fs.readFileSync(exePath);
+                log('B read exe size ' + buf.length);
+              } catch (e3) {
+                log('B readFileSync err: ' + (e3 && (e3.message || e3.stack) || e3).toString().slice(0, 300));
               }
             }
             let ok = false;
