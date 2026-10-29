@@ -40,12 +40,35 @@ jobs:
         run: |
           python -c "p='installer.nsi'; s=open(p,encoding='utf-8').read(); open(p,'w',encoding='utf-8-sig').write(s)"
 
-      - name: 生成安装包
+      - name: 生成安装包（makensis 定位诊断）
         shell: pwsh
         run: |
-          makensis /V2 installer.nsi
-          if ($LASTEXITCODE -ne 0) { Write-Host "MAKENSIS FAILED"; exit 1 }
-          Get-ChildItem *.exe | ForEach-Object { Write-Host "FILE: $($_.Name) SIZE: $($_.Length)" }
+          $diag = @()
+          $candidates = @('makensis','C:\ProgramData\chocolatey\bin\makensis.exe','C:\Program Files (x86)\NSIS\makensis.exe','C:\Program Files\NSIS\makensis.exe')
+          $mkPath = $null
+          foreach ($c in $candidates) {
+            $cmd = Get-Command $c -ErrorAction SilentlyContinue
+            if ($cmd) { $mkPath = $cmd.Source; break }
+            if (Test-Path $c) { $mkPath = $c; break }
+          }
+          $diag += "PATH=$env:PATH"
+          $diag += "USING_MAKENSIS=$mkPath"
+          $diag += "CHOCO_SHIM=$(Test-Path 'C:\ProgramData\chocolatey\bin\makensis.exe')"
+          $diag += "PF86=$(Test-Path 'C:\Program Files (x86)\NSIS\makensis.exe')"
+          $diag += "PF=$(Test-Path 'C:\Program Files\NSIS\makensis.exe')"
+          $diag | Out-File -Encoding utf8 mk_diag.txt
+          if (-not $mkPath) {
+            $diag += "MAKENSIS_NOT_FOUND"
+            $diag | Out-File -Encoding utf8 mk_diag.txt
+            Write-Host "MAKENSIS NOT FOUND"
+            exit 1
+          }
+          & $mkPath /V2 installer.nsi 2>&1 | Tee-Object -FilePath mk_makensis_out.txt
+          $code = $LASTEXITCODE
+          "MAKENSIS_EXIT=$code" | Out-File -Append -Encoding utf8 mk_diag.txt
+          Get-ChildItem *.exe | ForEach-Object { "FILE: $($_.Name) SIZE: $($_.Length)" | Out-File -Append -Encoding utf8 mk_diag.txt }
+          Write-Host "MAKENSIS_EXIT=$code"
+          exit $code
 
       - name: 发布 Release 并上传 exe（curl API）
         shell: pwsh
@@ -54,7 +77,16 @@ jobs:
         run: |
           $repo = "zhiganglin16-ux/yunji-smart-split"
           $exe = "setup-yunji-v1.2.exe"
-          if (-not (Test-Path $exe)) { Write-Host "EXE NOT FOUND"; exit 1 }
+          if (-not (Test-Path $exe)) {
+            $mkDiag = ""
+            if (Test-Path mk_diag.txt) { $mkDiag = Get-Content -Raw mk_diag.txt }
+            if (Test-Path mk_makensis_out.txt) { $mkDiag += "`n---MAKENSIS OUT---`n" + (Get-Content -Raw mk_makensis_out.txt) }
+            $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($mkDiag))
+            $body = @{ message = "diag"; content = $b64 } | ConvertTo-Json -Compress
+            curl.exe -s -X PUT -H "Authorization: token $env:GH_TOKEN" -H "Content-Type: application/json" -d $body "https://api.github.com/repos/$repo/contents/debug-makensis.txt" | Out-Null
+            Write-Host "EXE NOT FOUND - diagnostic pushed"
+            exit 1
+          }
           $size = (Get-Item $exe).Length
           Write-Host "EXE SIZE: $size"
           $relJson = curl.exe -s -H "Authorization: token $env:GH_TOKEN" "https://api.github.com/repos/$repo/releases/tags/v1.2"
