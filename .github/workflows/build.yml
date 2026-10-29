@@ -54,10 +54,30 @@ jobs:
           name: installer
           path: setup-yunji-v1.2.exe
 
-      - name: 发布 Release（gh CLI 上传 exe）
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete v1.2 --yes --cleanup-tag 2>$null
-          gh release create v1.2 "setup-yunji-v1.2.exe" --repo zhiganglin16-ux/yunji-smart-split --title "云极智能拆版 V1.2" --notes "云极智能拆版 V1.2 安装包（Windows）- 多码自动拆版 / 自动选码打样 - 左右袖前后片自动标注 - 小尺码标/每裁片二维码 - 版师点位/缝制线/矢量描边标准 - 图案层写死裁片形状蒙版 - 拆版总览按码分组"
+      - name: 发布 Release 并上传 exe（github-script，兼容已存在/不存在的 Release）
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'setup-yunji-v1.2.exe';
+            const assetName = 'setup-yunji-v1.2.exe';
+            let rel;
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: 'v1.2' });
+              rel = data;
+              console.log('Release exists, id =', rel.id);
+            } catch (e) {
+              const { data: created } = await github.rest.repos.createRelease({ owner: context.repo.owner, repo: context.repo.repo, tag_name: 'v1.2', name: '云极智能拆版 V1.2', body: '云极智能拆版 V1.2 安装包（Windows）' });
+              rel = created;
+              console.log('Release created, id =', rel.id);
+            }
+            const buf = fs.readFileSync(path);
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: rel.id,
+              name: assetName,
+              data: buf,
+              headers: { 'content-type': 'application/octet-stream' }
+            });
+            console.log('Asset uploaded:', assetName);
