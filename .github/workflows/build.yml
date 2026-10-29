@@ -40,10 +40,17 @@ jobs:
           makensis /V2 installer.nsi
           dir /b
 
-      - name: 压缩为单个 zip（内单 exe 安装器）
-        shell: powershell
+      - name: 压缩为单个 zip（英文名压缩，规避 cmd/pwsh 编码差异）
+        shell: pwsh
         run: |
-          Compress-Archive -Path "云极智能拆版V1.2-安装包.exe" -DestinationPath "云极智能拆版V1.2-安装包.zip" -Force
+          Compress-Archive -Path "setup-yunji-v1.2.exe" -DestinationPath "setup-yunji-v1.2.zip" -Force
+
+      - name: 重命名为中文交付名
+        shell: pwsh
+        run: |
+          Rename-Item -Path "setup-yunji-v1.2.zip" -NewName "云极智能拆版V1.2-安装包.zip" -Force
+          Rename-Item -Path "setup-yunji-v1.2.exe" -NewName "云极智能拆版V1.2-安装包.exe" -Force
+          Get-ChildItem *.zip, *.exe
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
