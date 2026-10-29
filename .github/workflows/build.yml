@@ -54,68 +54,66 @@ jobs:
           name: installer
           path: setup-yunji-v1.2.exe
 
-      - name: 发布 Release 并上传 exe（双通道 + 错误落盘诊断）
+      - name: 发布 Release 并上传 exe（全链路诊断）
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const path = 'setup-yunji-v1.2.exe';
+            const path = require('path');
+            const ws = process.env.GITHUB_WORKSPACE || '.';
+            const exePath = path.join(ws, 'setup-yunji-v1.2.exe');
             const assetName = 'setup-yunji-v1.2.exe';
-            let rel;
+            const logs = [];
+            const log = (s) => { logs.push(String(s)); console.log(s); };
+            const owner = context.repo.owner, repo = context.repo.repo;
+            let rel = null;
             try {
-              const { data } = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: 'v1.2' });
-              rel = data;
-              console.log('Release exists, id =', rel.id);
+              const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: 'v1.2' });
+              rel = data; log('A got release ' + rel.id);
             } catch (e) {
-              const { data: created } = await github.rest.repos.createRelease({ owner: context.repo.owner, repo: context.repo.repo, tag_name: 'v1.2', name: '云极智能拆版 V1.2', body: '云极智能拆版 V1.2 安装包（Windows）' });
-              rel = created;
-              console.log('Release created, id =', rel.id);
+              log('A getReleaseByTag err: ' + (e && (e.message || e.stack) || e).toString().slice(0, 300));
+              try {
+                const { data } = await github.rest.repos.createRelease({ owner, repo, tag_name: 'v1.2', name: 'yunji-v1.2', body: 'installer' });
+                rel = data; log('A created release ' + rel.id);
+              } catch (e2) {
+                log('A createRelease err: ' + (e2 && (e2.message || e2.stack) || e2).toString().slice(0, 300));
+              }
             }
-            const buf = fs.readFileSync(path);
-            console.log('Exe size =', buf.length);
-            let ok = false;
-            let lastErr = '';
+            let buf = null;
             try {
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: rel.id,
-                name: assetName,
-                data: buf,
-                headers: { 'content-type': 'application/octet-stream' }
-              });
-              ok = true;
-              console.log('Asset uploaded via octokit');
-            } catch (err) {
-              lastErr = (err && (err.stack || err.message)) ? (err.stack || err.message).toString() : String(err);
-              console.log('octokit upload failed:', lastErr.slice(0, 500));
-            }
-            if (!ok) {
+              buf = fs.readFileSync(exePath);
+              log('B read exe size ' + buf.length);
+            } catch (e3) {
+              log('B readFileSync err: ' + (e3 && (e3.message || e3.stack) || e3).toString().slice(0, 300));
               try {
-                await github.request(`POST /repos/${context.repo.owner}/${context.repo.repo}/releases/${rel.id}/assets?name=${assetName}`, {
-                  data: buf,
-                  headers: { 'content-type': 'application/octet-stream', 'content-length': buf.length }
-                });
-                ok = true;
-                console.log('Asset uploaded via raw API');
-              } catch (err2) {
-                lastErr = (err2 && (err2.stack || err2.message)) ? (err2.stack || err2.message).toString() : String(err2);
-                console.log('raw API upload failed:', lastErr.slice(0, 500));
+                log('B cwd files: ' + fs.readdirSync(ws).join(' | '));
+              } catch (e3b) {
+                log('B readdir err: ' + String(e3b).slice(0, 200));
               }
             }
-            if (!ok) {
-              const diag = 'releaseId=' + rel.id + '\nsize=' + buf.length + '\nERR:\n' + lastErr;
+            let ok = false;
+            if (rel && buf) {
               try {
-                await github.rest.repos.createOrUpdateFileContents({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: 'debug-upload-error.txt',
-                  message: 'debug upload error',
-                  content: Buffer.from(diag).toString('base64')
-                });
-                console.log('debug file written');
-              } catch (e3) {
-                console.log('debug file write failed');
+                await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: rel.id, name: assetName, data: buf, headers: { 'content-type': 'application/octet-stream' } });
+                ok = true; log('C uploaded via octokit');
+              } catch (e4) {
+                log('C octokit upload err: ' + (e4 && (e4.stack || e4.message) || e4).toString().slice(0, 800));
               }
-              process.exitCode = 1;
+              if (!ok) {
+                try {
+                  await github.request('POST /repos/{owner}/{repo}/releases/{release_id}/assets?name=' + assetName, { owner, repo, release_id: rel.id, data: buf, headers: { 'content-type': 'application/octet-stream', 'content-length': buf.length } });
+                  ok = true; log('C uploaded via raw API');
+                } catch (e5) {
+                  log('C raw upload err: ' + (e5 && (e5.stack || e5.message) || e5).toString().slice(0, 800));
+                }
+              }
+            } else {
+              log('C skip upload, rel=' + !!rel + ' buf=' + !!buf);
             }
+            try {
+              await github.rest.repos.createOrUpdateFileContents({ owner, repo, path: 'debug-upload-error.txt', message: 'debug', content: Buffer.from(logs.join('\n')).toString('base64') });
+              log('D debug written');
+            } catch (e6) {
+              log('D debug write err: ' + (e6 && (e6.message || e6.stack) || e6).toString().slice(0, 300));
+            }
+            if (!ok) { process.exitCode = 1; }
