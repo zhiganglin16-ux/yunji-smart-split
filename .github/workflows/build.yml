@@ -54,7 +54,7 @@ jobs:
           name: installer
           path: setup-yunji-v1.2.exe
 
-      - name: 发布 Release 并上传 exe（github-script，兼容已存在/不存在的 Release）
+      - name: 发布 Release 并上传 exe（双通道 + 错误落盘诊断）
         uses: actions/github-script@v7
         with:
           script: |
@@ -72,12 +72,50 @@ jobs:
               console.log('Release created, id =', rel.id);
             }
             const buf = fs.readFileSync(path);
-            await github.rest.repos.uploadReleaseAsset({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: rel.id,
-              name: assetName,
-              data: buf,
-              headers: { 'content-type': 'application/octet-stream' }
-            });
-            console.log('Asset uploaded:', assetName);
+            console.log('Exe size =', buf.length);
+            let ok = false;
+            let lastErr = '';
+            try {
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: rel.id,
+                name: assetName,
+                data: buf,
+                headers: { 'content-type': 'application/octet-stream' }
+              });
+              ok = true;
+              console.log('Asset uploaded via octokit');
+            } catch (err) {
+              lastErr = (err && (err.stack || err.message)) ? (err.stack || err.message).toString() : String(err);
+              console.log('octokit upload failed:', lastErr.slice(0, 500));
+            }
+            if (!ok) {
+              try {
+                await github.request(`POST /repos/${context.repo.owner}/${context.repo.repo}/releases/${rel.id}/assets?name=${assetName}`, {
+                  data: buf,
+                  headers: { 'content-type': 'application/octet-stream', 'content-length': buf.length }
+                });
+                ok = true;
+                console.log('Asset uploaded via raw API');
+              } catch (err2) {
+                lastErr = (err2 && (err2.stack || err2.message)) ? (err2.stack || err2.message).toString() : String(err2);
+                console.log('raw API upload failed:', lastErr.slice(0, 500));
+              }
+            }
+            if (!ok) {
+              const diag = 'releaseId=' + rel.id + '\nsize=' + buf.length + '\nERR:\n' + lastErr;
+              try {
+                await github.rest.repos.createOrUpdateFileContents({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: 'debug-upload-error.txt',
+                  message: 'debug upload error',
+                  content: Buffer.from(diag).toString('base64')
+                });
+                console.log('debug file written');
+              } catch (e3) {
+                console.log('debug file write failed');
+              }
+              process.exitCode = 1;
+            }
