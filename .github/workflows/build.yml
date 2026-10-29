@@ -1,0 +1,67 @@
+name: build-windows-installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 还原品牌资源（base64 → 二进制）
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("icon.ico", [Convert]::FromBase64String((Get-Content -Raw icon.ico.b64).Trim()))
+          New-Item -ItemType Directory -Force brand | Out-Null
+          [IO.File]::WriteAllBytes("brand/云极科技LOGO-图标.png", [Convert]::FromBase64String((Get-Content -Raw brand_logo.b64).Trim()))
+          Get-ChildItem icon.ico, brand
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install PySide6 opencv-python-headless numpy shapely pytoshop qrcode pillow pyinstaller
+
+      - name: 编译 EXE（PyInstaller onefile）
+        run: pyinstaller build.spec --noconfirm
+
+      - name: 安装 NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: 生成安装包
+        shell: cmd
+        run: |
+          makensis /V2 installer.nsi
+          dir /b
+
+      - name: 压缩为单个 zip（内单 exe 安装器）
+        shell: powershell
+        run: |
+          Compress-Archive -Path "云极智能拆版V1.2-安装包.exe" -DestinationPath "云极智能拆版V1.2-安装包.zip" -Force
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: 云极智能拆版V1.2-安装包.zip
+
+      - name: 发布 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 云极智能拆版V1.2-安装包.zip
+          tag_name: v1.2
+          name: 云极智能拆版 V1.2
+          body: |
+            云极智能拆版 V1.2 安装包（Windows）
+            - 多码自动拆版 / 自动选码打样
+            - 左右袖、前后片自动标注（可选项）
+            - 小尺码标、每裁片二维码（可选项）
+            - 版师点位 / 缝制线 / 矢量描边标准
+            - 图案层写死裁片形状蒙版
+            - 拆版总览按码分组（一码一区）
