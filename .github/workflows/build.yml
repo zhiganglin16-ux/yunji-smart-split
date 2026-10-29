@@ -40,76 +40,36 @@ jobs:
         run: |
           python -c "p='installer.nsi'; s=open(p,encoding='utf-8').read(); open(p,'w',encoding='utf-8-sig').write(s)"
 
-      - name: 生成安装包并发布 Release（makensis 输出捕获 + 双通道上传 + 诊断落盘）
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { execSync } = require('child_process');
-            const fs = require('fs');
-            const path = require('path');
-            const ws = process.env.GITHUB_WORKSPACE || '.';
-            const logs = [];
-            const log = (s) => { logs.push(String(s)); console.log(s); };
-            const owner = context.repo.owner, repo = context.repo.repo;
-            let mkOk = false;
-            try {
-              const out = execSync('makensis /V2 installer.nsi', { cwd: ws, stdio: 'pipe', encoding: 'utf8' });
-              mkOk = true;
-              log('E makensis OK, output len=' + (out || '').length);
-            } catch (e) {
-              log('E makensis FAIL status=' + e.status);
-              log('E stdout=' + String(e.stdout || '').slice(0, 3000));
-              log('E stderr=' + String(e.stderr || '').slice(0, 3000));
-            }
-            let files;
-            try { files = fs.readdirSync(ws).join(' | '); log('E ws files: ' + files); } catch (err) { log('E readdir err: ' + String(err).slice(0, 200)); }
-            const exePath = path.join(ws, 'setup-yunji-v1.2.exe');
-            const assetName = 'setup-yunji-v1.2.exe';
-            let rel = null;
-            try {
-              const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag: 'v1.2' });
-              rel = data; log('A got release ' + rel.id);
-            } catch (e) {
-              log('A getReleaseByTag err: ' + (e && (e.message || e.stack) || e).toString().slice(0, 300));
-              try {
-                const { data } = await github.rest.repos.createRelease({ owner, repo, tag_name: 'v1.2', name: '云极智能拆版 V1.2', body: '云极智能拆版 V1.2 安装包（Windows）' });
-                rel = data; log('A created release ' + rel.id);
-              } catch (e2) {
-                log('A createRelease err: ' + (e2 && (e2.message || e2.stack) || e2).toString().slice(0, 300));
-              }
-            }
-            let buf = null;
-            if (mkOk) {
-              try {
-                buf = fs.readFileSync(exePath);
-                log('B read exe size ' + buf.length);
-              } catch (e3) {
-                log('B readFileSync err: ' + (e3 && (e3.message || e3.stack) || e3).toString().slice(0, 300));
-              }
-            }
-            let ok = false;
-            if (rel && buf) {
-              try {
-                await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: rel.id, name: assetName, data: buf, headers: { 'content-type': 'application/octet-stream' } });
-                ok = true; log('C uploaded via octokit');
-              } catch (e4) {
-                log('C octokit upload err: ' + (e4 && (e4.stack || e4.message) || e4).toString().slice(0, 800));
-              }
-              if (!ok) {
-                try {
-                  await github.request('POST /repos/{owner}/{repo}/releases/{release_id}/assets?name=' + assetName, { owner, repo, release_id: rel.id, data: buf, headers: { 'content-type': 'application/octet-stream', 'content-length': buf.length } });
-                  ok = true; log('C uploaded via raw API');
-                } catch (e5) {
-                  log('C raw upload err: ' + (e5 && (e5.stack || e5.message) || e5).toString().slice(0, 800));
-                }
-              }
-            } else {
-              log('C skip upload, rel=' + !!rel + ' buf=' + !!buf);
-            }
-            try {
-              await github.rest.repos.createOrUpdateFileContents({ owner, repo, path: 'debug-upload-error.txt', message: 'debug', content: Buffer.from(logs.join('\n')).toString('base64') });
-              log('D debug written');
-            } catch (e6) {
-              log('D debug write err: ' + (e6 && (e6.message || e6.stack) || e6).toString().slice(0, 300));
-            }
-            if (!ok) { process.exitCode = 1; }
+      - name: 生成安装包
+        shell: pwsh
+        run: |
+          makensis /V2 installer.nsi
+          if ($LASTEXITCODE -ne 0) { Write-Host "MAKENSIS FAILED"; exit 1 }
+          Get-ChildItem *.exe | ForEach-Object { Write-Host "FILE: $($_.Name) SIZE: $($_.Length)" }
+
+      - name: 发布 Release 并上传 exe（curl API）
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "zhiganglin16-ux/yunji-smart-split"
+          $exe = "setup-yunji-v1.2.exe"
+          if (-not (Test-Path $exe)) { Write-Host "EXE NOT FOUND"; exit 1 }
+          $size = (Get-Item $exe).Length
+          Write-Host "EXE SIZE: $size"
+          $relJson = curl.exe -s -H "Authorization: token $env:GH_TOKEN" "https://api.github.com/repos/$repo/releases/tags/v1.2"
+          $rel = $relJson | ConvertFrom-Json
+          $relId = $rel.id
+          if (-not $relId) {
+            Write-Host "Creating release..."
+            $body = '{"tag_name":"v1.2","name":"云极智能拆版 V1.2","body":"云极智能拆版 V1.2 安装包（Windows）"}'
+            $createJson = curl.exe -s -X POST -H "Authorization: token $env:GH_TOKEN" -H "Content-Type: application/json" -d $body "https://api.github.com/repos/$repo/releases"
+            $rel2 = $createJson | ConvertFrom-Json
+            $relId = $rel2.id
+            if (-not $relId) { Write-Host "CREATE RELEASE FAILED: $createJson"; exit 1 }
+          }
+          Write-Host "RELEASE ID: $relId"
+          $uploadOut = curl.exe -s -X POST -H "Authorization: token $env:GH_TOKEN" -H "Content-Type: application/octet-stream" --data-binary "@$exe" "https://uploads.github.com/repos/$repo/releases/$relId/assets?name=setup-yunji-v1.2.exe"
+          Write-Host "UPLOAD RESP: $uploadOut"
+          $up = $uploadOut | ConvertFrom-Json
+          if ($up.id) { Write-Host "ASSET UPLOADED: $($up.name) size=$($up.size)" } else { Write-Host "ASSET UPLOAD FAILED"; exit 1 }
