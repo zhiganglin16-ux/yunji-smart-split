@@ -1,0 +1,4 @@
+A got release 427760814
+B readFileSync err: ENOENT: no such file or directory, open 'D:\a\yunji-smart-split\yunji-smart-split\setup-yunji-v1.2.exe'
+B cwd files: .git | .github | .gitignore | app.py | brand | brand_logo.b64 | build | build.bat | build.spec | core | dist | icon.ico | icon.ico.b64 | installer.nsi | README.md | requirements.txt | samples | scripts | ui | 使用说明.txt
+C skip upload, rel=true buf=false
